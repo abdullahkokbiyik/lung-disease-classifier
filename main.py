@@ -7,36 +7,48 @@ import torch.optim as optim
 from CNN import CNN
 import time
 import copy
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
 
 
 def main():
-    
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model = CNN()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
+    #♦ lr=0.01 ile dene.
+    optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
     criterion = CrossEntropyLoss()
     model = model.to(device)
     criterion = criterion.to(device)
     
-    transform = transforms.Compose([
+    transform_train = transforms.Compose([
+          transforms.Resize((224, 224)),
+          transforms.RandomHorizontalFlip(),
+          transforms.RandomRotation(12),
+          transforms.ToTensor(),
+          transforms.Normalize((0.5,), (0.5))
+        ])
+    
+    """transform_test = transforms.Compose([
           transforms.Resize((224, 224)),
           transforms.ToTensor(),
           transforms.Normalize((0.5,), (0.5,))
-        ])
+        ])"""
     
-    train_dataset = XRAYDataset('dataset/train/', transform=transform)
-    val_dataset = XRAYDataset('dataset/val/', transform=transform)
-    test_dataset = XRAYDataset('dataset/test/', transform=transform)
+    train_data = XRAYDataset('dataset/train/', transform=transform_train)
+    train_val_dataset, test_dataset = train_test_split(train_data, test_size=0.2, shuffle=True)
+    train_dataset, val_dataset = train_test_split(train_val_dataset, test_size=0.2, shuffle=True)
+    # val_dataset = XRAYDataset('dataset/val/', transform=transform)
+    # test_dataset = XRAYDataset('dataset/test/', transform=transform_test)
     
-    train_loader = DataLoader(dataset=train_dataset, batch_size=32, shuffle=True)
-    val_loader = DataLoader(dataset=val_dataset, batch_size=32, shuffle=True)
-    test_loader = DataLoader(dataset=test_dataset, batch_size=32, shuffle=True)
+    train_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=True)
+    val_loader = DataLoader(dataset=val_dataset, batch_size=64, shuffle=True)
+    test_loader = DataLoader(dataset=test_dataset, batch_size=64, shuffle=True)
     
     train_val_loader = dict()
     train_val_loader['train'] = train_loader
     train_val_loader['val'] = val_loader
     
-    best_model = train(model, train_val_loader, optimizer, criterion, device, 25)
+    best_model = train(model, train_val_loader, optimizer, criterion, device, 100)
     test(best_model, criterion, test_loader, device)
 
 
@@ -44,6 +56,7 @@ def train(model, dataloaders, optimizer, criterion, device, num_epochs=25):
     since = time.time()
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
+    best_loss = 1.0
     loss_dict = dict()
     loss_dict['train'] = list()
     loss_dict['val'] = list()
@@ -80,7 +93,7 @@ def train(model, dataloaders, optimizer, criterion, device, num_epochs=25):
                     loss = criterion(outputs, labels)
     
                     # backward + optimize only if in training phase
-                    if phase == 'train':
+                    if phase == 'train':    
                         loss.backward()
                         optimizer.step()
     
@@ -97,17 +110,22 @@ def train(model, dataloaders, optimizer, criterion, device, num_epochs=25):
             print('{} Loss: {:.4f} Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
     
             # deep copy the model
-            if phase == 'val' and epoch_acc > best_acc:
+            if phase == 'val' and epoch_loss < best_loss:
                 best_acc = epoch_acc
+                best_loss = epoch_loss
                 best_model_wts = copy.deepcopy(model.state_dict())
     
         print()
 
     time_elapsed = time.time() - since
+    plot("Loss", loss_dict['train'], loss_dict['val'], num_epochs)
+    plot("Accuracy", acc_dict['train'], acc_dict['val'], num_epochs)
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Best val Acc: {:4f}'.format(best_acc))
+    print('Best val Loss: {:4f}'.format(best_loss))
     # load best model weights
-    # model.load_state_dict(best_model_wts)
+    # Dataseti düzelttikten sonra burayı açacağız
+    model.load_state_dict(best_model_wts)
     return model
 
 
@@ -135,6 +153,16 @@ def test(model, criterion, test_loader, device):
     epoch_acc = correct.double()/len(test_loader.dataset)
     print('Test Loss: {:.4f} Acc: {:.4f}'.format(epoch_loss, epoch_acc))
     return epoch_acc, epoch_loss, pred_list, correct_list
+
+
+def plot(loss_or_acc, train, val, num_epoch):
+    x = [i+1 for i in range(num_epoch)]
+    plt.plot(x, train)
+    plt.plot(x, val)
+    plt.ylabel(loss_or_acc)
+    plt.xlabel("Epochs")
+    plt.legend(['Train', 'Validation'], loc='upper right')
+    plt.show()
 
 
 if __name__ == "__main__":
